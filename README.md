@@ -1,2 +1,2 @@
 # Autonomous_Pookie
-Mini Waymo in a sense
+Mini level 3 autonomous vehicle in a sense

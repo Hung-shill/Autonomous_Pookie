@@ -1,0 +1,327 @@
+#!/usr/bin/env python3.11
+"""
+3D Point Cloud Visualizer for Autonomous Vehicle Mapping
+Reads CSV files with X,Y,Z coordinates and visualizes them in 3D
+"""
+
+import numpy as np
+import open3d as o3d
+from pathlib import Path
+import sys
+
+# Optional: pandas only needed for CSV files
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
+    print("Note: pandas not installed. CSV loading will not be available.")
+
+
+class PointCloudVisualizer:
+    """Handles loading and visualization of 3D point cloud data from CSV files"""
+    
+    def __init__(self, colormap='height'):
+        """
+        Initialize visualizer
+        
+        Args:
+            colormap: Coloring strategy - 'height', 'distance', 'intensity', or 'custom'
+        """
+        self.colormap = colormap
+        self.point_cloud = o3d.geometry.PointCloud()
+    
+    def load_csv(self, csv_path, columns=['X', 'Y', 'Z']):
+        """
+        Load point cloud data from CSV file
+
+        Args:
+            csv_path: Path to CSV file
+            columns: Column names for X, Y, Z coordinates
+
+        Returns:
+            numpy array of points (N x 3)
+        """
+        if not PANDAS_AVAILABLE:
+            print("✗ Error: pandas is required for CSV loading")
+            print("Install with: pip3 install pandas")
+            sys.exit(1)
+
+        try:
+            df = pd.read_csv(csv_path)
+
+            # Validate required columns exist
+            if not all(col in df.columns for col in columns):
+                raise ValueError(f"CSV must contain columns: {columns}")
+
+            points = df[columns].values
+            print(f"✓ Loaded {len(points)} points from {Path(csv_path).name}")
+            return points
+
+        except Exception as e:
+            print(f"✗ Error loading CSV: {e}")
+            sys.exit(1)
+
+    def load_ply(self, ply_path):
+        """
+        Load point cloud data from PLY file
+
+        Args:
+            ply_path: Path to PLY file
+
+        Returns:
+            numpy array of points (N x 3)
+        """
+        try:
+            pcd = o3d.io.read_point_cloud(str(ply_path))
+
+            if not pcd.has_points():
+                raise ValueError("PLY file contains no points")
+
+            points = np.asarray(pcd.points)
+
+            # Store colors if available
+            if pcd.has_colors():
+                self._stored_colors = np.asarray(pcd.colors)
+            else:
+                self._stored_colors = None
+
+            print(f"✓ Loaded {len(points)} points from {Path(ply_path).name}")
+            return points
+
+        except Exception as e:
+            print(f"✗ Error loading PLY: {e}")
+            sys.exit(1)
+    
+    def load_multiple_csv(self, csv_paths, columns=['X', 'Y', 'Z']):
+        """
+        Load and merge multiple CSV files
+
+        Args:
+            csv_paths: List of CSV file paths
+            columns: Column names for coordinates
+
+        Returns:
+            Combined numpy array of points
+        """
+        all_points = []
+        for path in csv_paths:
+            points = self.load_csv(path, columns)
+            all_points.append(points)
+
+        combined = np.vstack(all_points)
+        print(f"✓ Combined total: {len(combined)} points from {len(csv_paths)} files")
+        return combined
+
+    def load_multiple_ply(self, ply_paths):
+        """
+        Load and merge multiple PLY files
+
+        Args:
+            ply_paths: List of PLY file paths
+
+        Returns:
+            Combined numpy array of points
+        """
+        all_points = []
+        all_colors = []
+
+        for path in ply_paths:
+            points = self.load_ply(path)
+            all_points.append(points)
+
+            # Collect colors if available
+            if hasattr(self, '_stored_colors') and self._stored_colors is not None:
+                all_colors.append(self._stored_colors)
+
+        combined_points = np.vstack(all_points)
+
+        # If we have colors from PLY files, store them for later use
+        if all_colors:
+            self._stored_colors = np.vstack(all_colors)
+        else:
+            self._stored_colors = None
+
+        print(f"✓ Combined total: {len(combined_points)} points from {len(ply_paths)} files")
+        return combined_points
+    
+    def apply_colormap(self, points):
+        """
+        Generate colors based on selected colormap strategy
+        
+        Args:
+            points: numpy array (N x 3)
+            
+        Returns:
+            numpy array of RGB colors (N x 3), values in [0, 1]
+        """
+        if self.colormap == 'height':
+            # Color based on Z-axis (height) - like a heatmap
+            z_values = points[:, 2]
+            z_norm = (z_values - z_values.min()) / (z_values.max() - z_values.min() + 1e-8)
+            
+            # Create red-yellow-green gradient (low to high)
+            colors = np.zeros((len(points), 3))
+            colors[:, 0] = 1 - z_norm  # Red decreases with height
+            colors[:, 1] = z_norm       # Green increases with height
+            colors[:, 2] = 0.2          # Slight blue for contrast
+            
+        elif self.colormap == 'distance':
+            # Color based on distance from origin
+            distances = np.linalg.norm(points, axis=1)
+            dist_norm = (distances - distances.min()) / (distances.max() - distances.min() + 1e-8)
+            
+            # Blue (near) to red (far) gradient
+            colors = np.zeros((len(points), 3))
+            colors[:, 0] = dist_norm      # Red increases with distance
+            colors[:, 2] = 1 - dist_norm  # Blue decreases with distance
+            colors[:, 1] = 0.3            # Slight green
+            
+        elif self.colormap == 'intensity':
+            # Uniform intensity (grayscale based on Z)
+            z_values = points[:, 2]
+            intensity = (z_values - z_values.min()) / (z_values.max() - z_values.min() + 1e-8)
+            colors = np.column_stack([intensity, intensity, intensity])
+            
+        else:  # 'custom' or default
+            # Uniform teal color
+            colors = np.tile([0.2, 0.8, 0.8], (len(points), 1))
+        
+        return colors
+    
+    def create_point_cloud(self, points, use_stored_colors=True):
+        """
+        Create Open3D point cloud object with colors
+
+        Args:
+            points: numpy array (N x 3)
+            use_stored_colors: Use colors from PLY file if available
+        """
+        self.point_cloud.points = o3d.utility.Vector3dVector(points)
+
+        # Use stored colors from PLY file if available
+        if use_stored_colors and hasattr(self, '_stored_colors') and self._stored_colors is not None:
+            self.point_cloud.colors = o3d.utility.Vector3dVector(self._stored_colors)
+            print(f" Point cloud created with original PLY colors")
+        else:
+            # Apply colormap
+            colors = self.apply_colormap(points)
+            self.point_cloud.colors = o3d.utility.Vector3dVector(colors)
+            print(f" Point cloud created with '{self.colormap}' colormap")
+    
+    def visualize(self, show_axes=True, point_size=2.0):
+        """
+        Launch interactive 3D visualization
+        
+        Args:
+            show_axes: Display coordinate axes
+            point_size: Size of points in visualization
+        """
+        # Create coordinate frame (axes) if requested
+        geometries = [self.point_cloud]
+        
+        if show_axes:
+            coord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(
+                size=1.0, origin=[0, 0, 0]
+            )
+            geometries.append(coord_frame)
+        
+        # Visualization settings
+        vis = o3d.visualization.Visualizer()
+        vis.create_window(window_name="3D Point Cloud - Autonomous Vehicle Map")
+        
+        for geom in geometries:
+            vis.add_geometry(geom)
+        
+        # Adjust render options
+        render_option = vis.get_render_option()
+        render_option.point_size = point_size
+        render_option.background_color = np.asarray([0.1, 0.1, 0.1])  # Dark background
+        
+        print("\n" + "="*60)
+        print("Controls:")
+        print("  - Mouse: Rotate/Pan/Zoom")
+        print("  - Scroll: Zoom in/out")
+        print("  - R: Reset view")
+        print("  - Q/ESC: Quit")
+        print("="*60 + "\n")
+        
+        vis.run()
+        vis.destroy_window()
+    
+    def save_visualization(self, output_path="pointcloud_render.png"):
+        """
+        Save rendered image (alternative to interactive view)
+        
+        Args:
+            output_path: Path to save PNG image
+        """
+        vis = o3d.visualization.Visualizer()
+        vis.create_window(visible=False)
+        vis.add_geometry(self.point_cloud)
+        vis.capture_screen_image(output_path)
+        vis.destroy_window()
+        print(f"✓ Saved visualization to {output_path}")
+
+
+def main():
+    """Main execution function"""
+
+    # ===== CONFIGURATION =====
+    # Choose file type: 'csv' or 'ply'
+    FILE_TYPE = 'ply' #'csv'
+
+    # For CSV files:
+    CSV_FILE = "pointcloud_data.csv"  # Your CSV file path
+    COLUMN_NAMES = ['X', 'Y', 'Z']     # Column headers in CSV
+
+    # For PLY files (single file):
+    PLY_FILE = "3dlidardata/scan3D_live_20251026_115032.ply"
+
+    # For multiple PLY files (all files in 3dlidardata):
+    PLY_FILES = [
+        "3dlidardata/scan3D_live_20251026_115032.ply",
+        "3dlidardata/scan3D_live_20251026_115559.ply",
+        "3dlidardata/scan3D_live_20251026_115919.ply",
+        "3dlidardata/scan3D_live_20251030_083359.ply"
+    ]
+
+    COLORMAP = 'height'                 # Options: 'height', 'distance', 'intensity', 'custom'
+                                        # Note: PLY files preserve original colors by default
+    SHOW_AXES = True                    # Display coordinate axes
+    POINT_SIZE = 2.0                    # Point rendering size
+    USE_MULTIPLE_FILES = True           # Set to True to combine multiple files
+    USE_STORED_PLY_COLORS = False        # Use original colors from PLY files
+
+    # ===== VISUALIZATION =====
+    visualizer = PointCloudVisualizer(colormap=COLORMAP)
+
+    if FILE_TYPE == 'ply':
+        if USE_MULTIPLE_FILES:
+            # Load and combine multiple PLY files
+            points = visualizer.load_multiple_ply(PLY_FILES)
+        else:
+            # Load single PLY file
+            points = visualizer.load_ply(PLY_FILE)
+    else:  # csv
+        if USE_MULTIPLE_FILES:
+            # Multiple CSV files
+            CSV_FILES = ['scan1.csv', 'scan2.csv', 'scan3.csv']
+            points = visualizer.load_multiple_csv(CSV_FILES, columns=COLUMN_NAMES)
+        else:
+            # Single CSV file
+            points = visualizer.load_csv(CSV_FILE, columns=COLUMN_NAMES)
+        USE_STORED_PLY_COLORS = False  # CSV doesn't have stored colors
+
+    # Create and display point cloud
+    visualizer.create_point_cloud(points, use_stored_colors=USE_STORED_PLY_COLORS)
+    visualizer.visualize(show_axes=SHOW_AXES, point_size=POINT_SIZE)
+
+    # Optional: Save as image instead of interactive view
+    # visualizer.save_visualization("my_map_3d.png")
+
+
+if __name__ == "__main__":
+    main()
+
+    # to run: type "python3.11 3D_mapping_for_training" in terminal
