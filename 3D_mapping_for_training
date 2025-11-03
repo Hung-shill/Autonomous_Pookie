@@ -276,14 +276,17 @@ def main():
     COLUMN_NAMES = ['X', 'Y', 'Z']     # Column headers in CSV
 
     # For PLY files (single file):
-    PLY_FILE = "3dlidardata/scan3D_live_20251026_115032.ply"
+    # PLY_FILE = "Room/scan3D_live_20251031_044817.ply"
 
     # For multiple PLY files (all files in 3dlidardata):
     PLY_FILES = [
-        "3dlidardata/scan3D_live_20251026_115032.ply",
-        "3dlidardata/scan3D_live_20251026_115559.ply",
-        "3dlidardata/scan3D_live_20251026_115919.ply",
-        "3dlidardata/scan3D_live_20251030_083359.ply"
+        "Room/scan3D_live_20251031_042737.ply",
+        "Room/scan3D_live_20251031_043215.ply",
+        "Room/scan3D_live_20251031_044044.ply",
+        "Room/scan3D_live_20251031_044817.ply",
+        "Room/scan3D_live_20251031_045304.ply",
+        "Room/scan3D_live_20251031_050007.ply",
+        "Room/scan3D_live_20251031_051456.ply"
     ]
 
     COLORMAP = 'height'                 # Options: 'height', 'distance', 'intensity', 'custom'
@@ -291,7 +294,7 @@ def main():
     SHOW_AXES = True                    # Display coordinate axes
     POINT_SIZE = 2.0                    # Point rendering size
     USE_MULTIPLE_FILES = True           # Set to True to combine multiple files
-    USE_STORED_PLY_COLORS = False        # Use original colors from PLY files
+    USE_STORED_PLY_COLORS = True        # Use original colors from PLY files
 
     # ===== VISUALIZATION =====
     visualizer = PointCloudVisualizer(colormap=COLORMAP)

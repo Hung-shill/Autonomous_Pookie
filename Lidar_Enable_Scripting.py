@@ -24,8 +24,8 @@ MIN_DISTANCE = 50      # mm
 MAX_DISTANCE = 3000    # mm
 
 # Scanning parameters
-SCAN_DURATION = 90.0              # Total scan time in seconds
-ROTATION_UPDATE_INTERVAL = 5.0    # Update rotation angle every X seconds
+SCAN_DURATION = 180              # Total scan time in seconds
+ROTATION_UPDATE_INTERVAL = 10.0    # Update rotation angle every X seconds
 DISPLAY_UPDATE_RATE = 2.0         # Update 3D display every X seconds
 
 # Data directories
@@ -33,7 +33,7 @@ CSV_DIR = './CSV'
 PLY_DIR = './PLY'
 
 # Visualization settings
-VOXEL_SIZE = 10.0  # mm - downsampling for display performance
+VOXEL_SIZE = 2.0  # mm - downsampling for display performance
 POINT_SIZE = 2.0   # Display point size
 
 # ============================================================================
@@ -333,7 +333,7 @@ class Live3DScanner:
                     colors_array = np.array(self.colors_3d, dtype=np.float64)
                     
                     # Downsample for performance
-                    if len(points_array) > 50000:
+                    if len(points_array) > 200000:
                         # Voxel downsampling
                         pcd_temp = self.o3d.geometry.PointCloud()
                         pcd_temp.points = self.o3d.utility.Vector3dVector(points_array)
@@ -399,7 +399,7 @@ class Live3DScanner:
         print(f"  {len(pcd.points):,} points loaded")
         
         # Optional: downsample for smoother viewing
-        if len(pcd.points) > 100000:
+        if len(pcd.points) > 500000:
             print("  Applying voxel downsampling...")
             pcd = pcd.voxel_down_sample(voxel_size=VOXEL_SIZE)
             print(f"  {len(pcd.points):,} points after downsampling")
