@@ -6,14 +6,18 @@ Hardware: 2D LIDAR + Manual/Motor rotation
 Display: Live updating 3D point cloud
 """
 
+import sys
+import io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+
 import numpy as np
 import time
 import csv
 import os
+import pandas as pd
 from datetime import datetime
 from pyrplidar import PyRPlidar
 import threading
-import queue
 
 # ============================================================================
 # Config
@@ -100,8 +104,8 @@ class Live3DScanner:
         try:
             self.lidar = PyRPlidar()
             self.lidar.connect(port=port, baudrate=baudrate, timeout=3)
-            self.lidar.set_motor_pwm(500)
-            time.sleep(2)
+            self.lidar.set_motor_pwm(660)
+            time.sleep(4)
             print(f"✓ LIDAR connected at {baudrate} baud")
         except Exception as e:
             print(f"✗ Failed to connect: {e}")
@@ -137,9 +141,8 @@ class Live3DScanner:
         # Statistics
         self.total_points = 0
         self.rotations_completed = 0
-        
-        # Thread-safe queue for visualization updates
-        self.update_queue = queue.Queue()
+
+        self._lock = threading.Lock()
         
         print("✓ Scanner initialized\n")
     
@@ -194,14 +197,14 @@ class Live3DScanner:
         vis_thread.start()
         
         # Start scanning thread
-        scan_generator = self.lidar.force_scan()
+        scan_generator = self.lidar.start_scan()
         prev_angle = None
-        
+
         try:
             with open(csv_path, mode='w', newline='') as csvfile:
                 writer = csv.writer(csvfile)
                 writer.writerow(['Quality', 'Angle', 'Distance', 'Rotation'])
-                
+
                 for scan in scan_generator():
                     current_time = time.time()
                     elapsed = current_time - self.start_time
@@ -227,17 +230,18 @@ class Live3DScanner:
                             self.current_rotation_angle
                         )
                         
-                        # Store point
-                        self.points_3d.append([x, y, z])
-                        self.distances.append(scan.distance)
-                        
                         # Generate color
                         color = distance_to_color(scan.distance)
-                        self.colors_3d.append(color)
+
+                        # Store point (lock guards concurrent reads in vis thread)
+                        with self._lock:
+                            self.points_3d.append([x, y, z])
+                            self.distances.append(scan.distance)
+                            self.colors_3d.append(color)
                         
                         # Write to CSV
                         writer.writerow([
-                            15,
+                            scan.quality,
                             scan.angle,
                             scan.distance,
                             self.current_rotation_angle
@@ -327,10 +331,14 @@ class Live3DScanner:
             # Update display at regular intervals
             if current_time - last_update > DISPLAY_UPDATE_RATE:
                 
-                if len(self.points_3d) > 0:
+                with self._lock:
+                    pts_snapshot = list(self.points_3d)
+                    cols_snapshot = list(self.colors_3d)
+
+                if len(pts_snapshot) > 0:
                     # Create point cloud from collected data
-                    points_array = np.array(self.points_3d, dtype=np.float64)
-                    colors_array = np.array(self.colors_3d, dtype=np.float64)
+                    points_array = np.array(pts_snapshot, dtype=np.float64)
+                    colors_array = np.array(cols_snapshot, dtype=np.float64)
                     
                     # Downsample for performance
                     if len(points_array) > 200000:
@@ -352,10 +360,12 @@ class Live3DScanner:
                 
                 last_update = current_time
             
-            # Update visualizer
-            vis.poll_events()
+            # Update visualizer; poll_events() returns False when window is closed
+            if not vis.poll_events():
+                self.is_scanning = False
+                break
             vis.update_renderer()
-            
+
             # Small sleep to prevent CPU overuse
             time.sleep(0.05)
         
@@ -426,7 +436,7 @@ class Live3DScanner:
             self.lidar.stop()
             self.lidar.set_motor_pwm(0)
             self.lidar.disconnect()
-        except:
+        except Exception:
             pass
         print("✓ Cleanup complete")
 
@@ -442,12 +452,12 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     
-    parser.add_argument('--duration', type=float, default=90.0,
-                       help='Scan duration in seconds (default: 90)')
-    parser.add_argument('--interval', type=float, default=5.0,
-                       help='Rotation update interval in seconds (default: 5)')
-    parser.add_argument('--port', type=str, default='/dev/ttyUSB0',
-                       help='LIDAR serial port (default: /dev/ttyUSB0)')
+    parser.add_argument('--duration', type=float, default=SCAN_DURATION,
+                       help=f'Scan duration in seconds (default: {SCAN_DURATION})')
+    parser.add_argument('--interval', type=float, default=ROTATION_UPDATE_INTERVAL,
+                       help=f'Rotation update interval in seconds (default: {ROTATION_UPDATE_INTERVAL})')
+    parser.add_argument('--port', type=str, default='COM3',
+                       help='LIDAR serial port (default: COM3 on Windows, /dev/ttyUSB0 on Linux)')
     parser.add_argument('--baudrate', type=int, default=460800,
                        help='LIDAR baudrate (default: 460800)')
     
